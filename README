@@ -1,0 +1,15 @@
+CUDA-MPI scratchpad.
+
+Environment:
+* mvapich >= 1.7 & CRAY MPI
+* CUDA >= 3.2
+* PBS and SLURM
+* Linux clusters and Cray XK6
+* Tesla M2090 and X2090
+
+Compilation
+-----------
+
+The best option is to use CMake since it works nicely with CUDA and MPI and will automatically have nvcc use the proper mpi compiler wrapper.
+
+Another option is to simply specify all the include and library paths as well as all the libraries on the nvcc command line.
