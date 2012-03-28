@@ -5,9 +5,9 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
-#include <iterator>
 #include <unistd.h> 
 #include <cmath>
+#include <cassert>
 
 typedef double REAL;
 
@@ -32,7 +32,7 @@ struct Grid2D {
     REAL& operator()( int x, int y ) {
         return *( data + ( yOffset + y ) * rowStride + xOffset + x ); 
     }
-}
+
 };
 
 //------------------------------------------------------------------------------
@@ -87,7 +87,7 @@ Grid2D SubGridRegion( const Grid2D& g,
             width = stencilWidth;
             height = g.height - 2 * stencilHeight;
             xoff = g.xOffset + g.width - stencilWidth;
-            yoff = g.yOffset + sgstencilHeight;
+            yoff = g.yOffset + stencilHeight;
             break;
         case BOTTOM_LEFT:
             width = stencilWidth;
@@ -98,8 +98,8 @@ Grid2D SubGridRegion( const Grid2D& g,
         case BOTTOM_CENTER:
             width = g.width - 2 * stencilWidth;
             height = stencilHeight;
-            xoff = g.xOffset + s stencilWidth;
-            yoff = g.yOffset + s g.height - stencilHeight;
+            xoff = g.xOffset + stencilWidth;
+            yoff = g.yOffset + g.height - stencilHeight;
             break;
         case BOTTOM_RIGHT:
             width = stencilWidth;
@@ -114,18 +114,19 @@ Grid2D SubGridRegion( const Grid2D& g,
 }
 
 //------------------------------------------------------------------------------
-template < typename T > MPI_Datatype CreateMPIDataType();
+template < typename T > MPI_Datatype CreateArrayElementType();
 
-template <> MPI_Datatype< REAL >() { return MPI_DOUBLE_PRECISION; }
+template <> MPI_Datatype CreateArrayElementType< REAL >() { return MPI_DOUBLE_PRECISION; }
 
 //------------------------------------------------------------------------------
-MPI_Datatype void CreateMPISubArrayType( const Grid2D& g, const Grid2D& subgrid ) {
-    const int dimensions = 2;
-    const int sizes[] = { g.width, g.height };
-    const int subsizes[] = { subgrid.width, subgrid.height };
-    const int offsets[] = { subgrid.xOffset, subgrid.yOffset };
-    const int order = MPI_ORDER_C;
-    const MPI_Datatype arrayElementType = CreateArrayElementType< REAL >();// array element type
+MPI_Datatype CreateMPISubArrayType( const Grid2D& g, const Grid2D& subgrid ) {
+    int dimensions = 2;
+    int sizes[] = { g.width, g.height };
+    int subsizes[] = { subgrid.width, subgrid.height };
+    int offsets[] = { subgrid.xOffset, subgrid.yOffset };
+    int order = MPI_ORDER_C;
+    MPI_Datatype arrayElementType = CreateArrayElementType< REAL >();// array element type
+    MPI_Datatype newtype;
     MPI_Type_create_subarray( dimensions,
                               sizes,
                               subsizes,
@@ -133,7 +134,7 @@ MPI_Datatype void CreateMPISubArrayType( const Grid2D& g, const Grid2D& subgrid 
                               order,
                               arrayElementType,
                               &newtype );
-    MPI_Type_commit( newtype );
+    MPI_Type_commit( &newtype );
     return newtype;
 }
 
@@ -142,7 +143,7 @@ int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
     int thisRank = -1;
     MPI_Comm_rank( MPI_COMM_WORLD, &thisRank );
     int coord[] = { -1, -1 }; 
-     _MPI_Cart_coords( commm, thisRank, 2, coord );
+    MPI_Cart_coords( comm, thisRank, 2, coord );
     coord[ 0 ] + xOffset;
     coord[ 1 ] + yOffset;
     int rank = -1;
@@ -155,15 +156,15 @@ int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
 struct Offset {
     int x;
     int y;
-    Offset() : x( 0 ), y( 0 ) {}
-}
+    Offset( int ox, int oy ) : x( ox ), y( oy ) {}
+};
 
 Offset OffsetRegion( RegionID rid ) {
     int xoff = 0;
     int yoff = 0;
     switch( rid ) {
     case TOP_LEFT:
-        xoff = -1
+        xoff = -1;
         yoff =  1;
         break;
     case TOP_CENTER:
@@ -202,7 +203,7 @@ Offset OffsetRegion( RegionID rid ) {
 
 //------------------------------------------------------------------------------
 struct TransferInfo {
-    int sourceTaskId;
+    int srcTaskId;
     int destTaskId;
     int tag;
     void* data;
@@ -236,8 +237,8 @@ TransferInfo SendInfo( MPI_Comm cartcomm, int rank, RegionID source, Grid2D& g,
     ti.tag = source;
     Grid2D core = SubGridRegion( g, stencilWidth, stencilHeight, CENTER );
     ti.type = CreateMPISubArrayType( g, 
-                                     SubGridRegion( core, stencilWidth, stencilHeight, target ) );
-    Offset offset = OffsetRegion( target ); 
+                                     SubGridRegion( core, stencilWidth, stencilHeight, source ) );
+    Offset offset = OffsetRegion( source ); 
     ti.destTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
     return ti;     
 }
@@ -248,13 +249,14 @@ void ExchangeData( std::vector< TransferInfo >& recvArray,
 
     std::vector< int > requests( recvArray.size() );
     for( int i = 0; i != recvArray.size(); ++i ) {
-        MPI_Irecv( i->data, 1, i->type, i->srcTaskId, i->tag, i->comm, &( requests[ i ] ) );  
+        TransferInfo& t = recvArray[ i ];
+        MPI_Irecv( t.data, 1, t.type, t.srcTaskId, t.tag, t.comm, &( requests[ i ] ) );  
     }
     for( std::vector< TransferInfo >::iterator i = sendArray.begin();
          i != sendArray.end(); ++i ) {
         MPI_Isend( i->data, 1, i->type, i->destTaskId, i->tag, i->comm, &( i->request ) );  
     }
-    std::vector< int > status( sendArray.size() );
+    std::vector< MPI_Status > status( sendArray.size() );
     MPI_Waitall( requests.size(), &requests[ 0 ], &status[ 0 ] );  
 }
 
@@ -295,7 +297,7 @@ int main( int argc, char** argv ) {
     MPI_Comm_size( MPI_COMM_WORLD, &numtasks );
     // 2D square MPI cartesian grid 
     const int DIM = int( std::sqrt( double( numtasks ) ) );
-    td::vector< int > dims( 2, DIM );
+    std::vector< int > dims( 2, DIM );
     std::vector< int > periods( 2, 1 ); //periodic in both dimensions
     const int reorder = 0; //false - no reorder, is it actually used ?
     MPI_Comm cartcomm; // communicator for cartesian grid
@@ -310,10 +312,10 @@ int main( int argc, char** argv ) {
     int localWidth = 128;
     int localHeight = 128;
     int stencilWidth = 3;
-    int stencilHEight = 3;
+    int stencilHeight = 3;
     int localTotalWidth = localWidth + 2 * stencilWidth;
-    int lcoalTotalHeight = localHeight + 2 * stencilHeight;
-    std::vector< REAL > buffer( localTotalWidth, localTotalHeight, 0 );  
+    int localTotalHeight = localHeight + 2 * stencilHeight;
+    std::vector< REAL > buffer( localTotalWidth * localTotalHeight, 0 );  
     Grid2D localGrid( &buffer[ 0 ], localTotalWidth, localTotalHeight, localTotalHeight );
     // Create transfer info arrays
     std::pair< std::vector< TransferInfo > > infoArrays =
