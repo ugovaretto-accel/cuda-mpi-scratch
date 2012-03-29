@@ -440,6 +440,7 @@ int main( int argc, char** argv ) {
     int stencilHeight = 5;
     int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
     int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
+    
     REAL* deviceBuffer = 0;
     cudaMalloc( &deviceBuffer, localTotalWidth * localTotalHeight * sizeof( REAL ) );
     cudaMemset( deviceBuffer, 0, localTotalWidth * localTotalHeight * sizeof( REAL ) );   
