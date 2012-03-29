@@ -8,6 +8,8 @@
 #include <unistd.h> 
 #include <cmath>
 #include <cassert>
+#include <fstream>
+#include <sstream>
 
 typedef double REAL;
 
@@ -305,6 +307,19 @@ void InitArray( T* pdata, const Array2D& g, const T& value ) {
 
 //------------------------------------------------------------------------------
 template < typename T >
+void Print( T* pdata, const Array2D& g, std::ostream& os ) {
+    Array2DAccessor< T > a( pdata, g );
+    for( int row = 0; row != a.Layout().height; ++row ) {
+        for( int column = 0; column != a.Layout().width; ++column ) {
+            os << a( column, row ) << ' ';
+
+        }
+        os << std::endl;
+    }
+}
+
+//------------------------------------------------------------------------------
+template < typename T >
 void Compute( T* pdata, const Array2D& g ) {}
 
 //------------------------------------------------------------------------------
@@ -333,8 +348,8 @@ int main( int argc, char** argv ) {
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
     //////////////////////
     // Init data
-    int localWidth = 128;
-    int localHeight = 128;
+    int localWidth = 16;
+    int localHeight = 16;
     int stencilWidth = 3;
     int stencilHeight = 3;
     int localTotalWidth = localWidth + 2 * stencilWidth;
@@ -354,7 +369,12 @@ int main( int argc, char** argv ) {
     } while( !TerminateCondition( &dataBuffer[ 0 ], core ) );
 
     MPI_Finalize();
-    
+
+    std::ostringstream ss;
+    ss << coords[ 0 ] << '_' << coords[ 1 ];
+    std::ofstream os( ss.str().c_str() );
+    Print( &dataBuffer[ 0 ], core, os );   
+ 
     return 0;
 }
 
