@@ -47,6 +47,7 @@ public:
                     layout_.rowStride * y + x ); 
     }
     T& operator()( int x, int y ) {
+        
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                   layout_.rowStride * y + x ); 
@@ -207,10 +208,12 @@ int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
     MPI_Comm_rank( MPI_COMM_WORLD, &thisRank );
     int coord[] = { -1, -1 }; 
     MPI_Cart_coords( comm, thisRank, 2, coord );
-    coord[ 0 ] + xOffset;
-    coord[ 1 ] + yOffset;
+//    printf( "%d %d\n", coord[ 0 ], coord[ 1 ] );
+    coord[ 0 ] += xOffset;
+    coord[ 1 ] += yOffset;
     int rank = -1;
     MPI_Cart_rank( comm, coord, &rank );
+//    printf( "In rank: %d, offset: %d, %d; out rank: %d\n", thisRank, xOffset, yOffset, rank ); 
     return rank; 
 }
 
@@ -258,6 +261,22 @@ Offset OffsetRegion( RegionID rid ) {
         xoff =  1;
         yoff = -1;
         break;
+    case TOP:
+        xoff = 0;
+        yoff = 1;
+        break;
+    case RIGHT:
+        xoff = 1;
+        yoff = 0;
+        break;
+    case BOTTOM:
+        xoff = 0;
+        yoff = -1;
+        break;
+    case LEFT:
+        xoff = -1;
+        yoff = 0;
+        break; 
     default:
         break;
     }
@@ -276,32 +295,37 @@ struct TransferInfo {
 };
 
 //------------------------------------------------------------------------------
-TransferInfo ReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank, RegionID target, Array2D& g,
-                          int stencilWidth, int stencilHeight ) {
+TransferInfo ReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank, 
+                          RegionID source, RegionID target, Array2D& g,
+                          int stencilWidth, int stencilHeight, int tag ) {
     TransferInfo ti;
     ti.comm = cartcomm;
     ti.data = pdata;
     ti.destTaskId = rank;
-    ti.tag = target;
+    ti.tag = tag;
     ti.type = CreateMPISubArrayType( g, 
                                      SubArrayRegion( g, stencilWidth, stencilHeight, target ) );
-    Offset offset = OffsetRegion( target ); 
-    ti.srcTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
+    Offset offset = OffsetRegion( source ); 
+    ti.srcTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );
+
+  //  printf( "source %d dest %d\n", ti.srcTaskId, ti.destTaskId ); 
+  
     return ti;     
 }
  
 //------------------------------------------------------------------------------
-TransferInfo SendInfo( void* pdata, MPI_Comm cartcomm, int rank, RegionID source, Array2D& g,
-                       int stencilWidth, int stencilHeight ) {
+TransferInfo SendInfo( void* pdata, MPI_Comm cartcomm, int rank, 
+                       RegionID source, RegionID target, Array2D& g,
+                       int stencilWidth, int stencilHeight, int tag ) {
     TransferInfo ti;
     ti.comm = cartcomm;
     ti.data = pdata;
     ti.srcTaskId = rank;
-    ti.tag = source;
+    ti.tag = tag;
     Array2D core = SubArrayRegion( g, stencilWidth, stencilHeight, CENTER );
     ti.type = CreateMPISubArrayType( g, 
                                      SubArrayRegion( core, stencilWidth, stencilHeight, source ) );
-    Offset offset = OffsetRegion( source ); 
+    Offset offset = OffsetRegion( target ); 
     ti.destTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
     return ti;     
 }
@@ -330,12 +354,17 @@ CreateSendRecvArrays( void* pdata, MPI_Comm cartcomm, int rank, Array2D& g,
                       int stencilWidth, int stencilHeight ) {
     std::vector< TransferInfo > ra;
     std::vector< TransferInfo > sa;
-    RegionID rids[] = { TOP_LEFT,    TOP_CENTER,    TOP_RIGHT,
-                        CENTER_LEFT, CENTER,        CENTER_RIGHT,
-                        BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT };
-    for( RegionID* i = rids; i != rids + sizeof( rids ) / sizeof( RegionID ); ++i ) {
-        ra.push_back( ReceiveInfo( pdata, cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
-        sa.push_back( SendInfo( pdata, cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
+    RegionID sendRegions[] = { TOP_LEFT,    TOP,    TOP_RIGHT,
+                               LEFT,                RIGHT,
+                               BOTTOM_LEFT, BOTTOM, BOTTOM_RIGHT };
+    RegionID recvRegions[] = { BOTTOM_RIGHT,  BOTTOM_CENTER,    BOTTOM_LEFT,
+                               CENTER_RIGHT,                CENTER_LEFT,
+                               TOP_RIGHT, TOP_CENTER, TOP_LEFT };
+
+    // use send regions as tags
+    for( RegionID *s = sendRegions, *r = recvRegions; s !=  sendRegions + sizeof( sendRegions ) / sizeof( RegionID ); ++s, ++r ) {
+        ra.push_back( ReceiveInfo( pdata, cartcomm, rank, *s, *r, g, stencilWidth, stencilHeight, *s ) );   
+        sa.push_back( SendInfo( pdata, cartcomm, rank, *s, *r, g, stencilWidth, stencilHeight, *s ) );   
     }
     return std::make_pair( ra, sa ); 
 }
@@ -364,11 +393,10 @@ bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 //------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
-#if 1
+#if 0 
     void TestSubRegionExtraction();
     TestSubRegionExtraction();
 #else
-
     int numtasks = 0; 
     // Init, world size     
     MPI_Init( &argc, &argv );
@@ -385,35 +413,39 @@ int main( int argc, char** argv ) {
     int task = -1;
     MPI_Comm_rank( cartcomm, &task );
     
-    std::cout << task << std::endl;
     std::vector< int > coords( 2, -1 );
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
-    
+      
+    std::ostringstream ss;
+    ss << coords[ 0 ] << '_' << coords[ 1 ];
+    std::ofstream os( ss.str().c_str() );
+    os << "Rank:  " << task << std::endl
+       << "Coord: " << coords[ 0 ] << ", " << coords[ 1 ] << std::endl;
     // Init data
     int localWidth = 16;
     int localHeight = 16;
-    int stencilWidth = 3;
-    int stencilHeight = 3;
+    int stencilWidth = 5;
+    int stencilHeight = 5;
     int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
     int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
     std::vector< REAL > dataBuffer( localTotalWidth * localTotalHeight, 0 );  
-    Array2D localArray( localTotalWidth, localTotalHeight, localTotalHeight );
+    Array2D localArray( localTotalWidth, localTotalHeight, localTotalWidth );
     // Create transfer info arrays
     typedef std::vector< TransferInfo > VTI;
     std::pair< VTI, VTI > transferInfoArrays =
         CreateSendRecvArrays( &dataBuffer[ 0 ], cartcomm, task, localArray, stencilWidth, stencilHeight );     
     Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
     InitArray( &dataBuffer[ 0 ], core, REAL( task + 1 ) ); //init with this MPI task id
+    os << "Array" << std::endl;
+    Print( &dataBuffer[ 0 ], localArray, os );
+    os << std::endl;
     // Exchange data and compute until condition met
     do {
         ExchangeData( transferInfoArrays.first, transferInfoArrays.second );
         Compute( &dataBuffer[ 0 ], core );
     } while( !TerminateCondition( &dataBuffer[ 0 ], core ) );
-
+    os << "Array after exchange" << std::endl;    
     MPI_Finalize();
-    std::ostringstream ss;
-    ss << coords[ 0 ] << '_' << coords[ 1 ];
-    std::ofstream os( ss.str().c_str() );
     Print( &dataBuffer[ 0 ], localArray, os );   
  #endif
     return 0;
