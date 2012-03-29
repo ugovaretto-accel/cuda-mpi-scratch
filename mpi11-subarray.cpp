@@ -29,6 +29,14 @@ struct Array2D {
     {}
 };
 
+std::ostream& operator<<( std::ostream& os, const Array2D& a ) {
+    os << "width:  " << a.width << ", " 
+       << "height: " << a.height << ", "
+       << "x offset: " << a.xOffset << ", "
+       << "y offset: " << a.yOffset;
+    return os;
+}
+
 //------------------------------------------------------------------------------
 template < typename T >
 class Array2DAccessor {
@@ -54,7 +62,21 @@ private:
 //------------------------------------------------------------------------------
 enum RegionID { TOP_LEFT,    TOP_CENTER,    TOP_RIGHT,
                 CENTER_LEFT, CENTER,        CENTER_RIGHT,
-                BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT };
+                BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT,
+                TOP, LEFT, BOTTOM, RIGHT };
+
+//------------------------------------------------------------------------------
+template < typename T >
+void Print( T* pdata, const Array2D& g, std::ostream& os ) {
+    Array2DAccessor< T > a( pdata, g );
+    for( int row = 0; row != a.Layout().height; ++row ) {
+        for( int column = 0; column != a.Layout().width; ++column ) {
+            os << a( column, row ) << ' ';
+
+        }
+        os << std::endl;
+    }
+}
 
 //------------------------------------------------------------------------------
 //Possible to use templated function specialized with RegionID
@@ -67,62 +89,87 @@ Array2D SubArrayRegion( const Array2D& g,
     int xoff = 0;
     int yoff = 0;
     const int stride = g.width;
-
+    const int ghostRegionWidth  = stencilWidth  / 2;
+    const int ghostRegionHeight = stencilHeight / 2;
     switch( rid ) {
         case TOP_LEFT:
-            width = stencilWidth;
-            height = stencilHeight;
+            width = ghostRegionWidth;
+            height = ghostRegionHeight;
             xoff = g.xOffset;
             yoff = g.yOffset;
             break;
         case TOP_CENTER:
-            width = g.width - 2 * stencilWidth;
-            height = stencilHeight;
-            xoff = g.xOffset + stencilWidth;
+            width = g.width - 2 * ghostRegionWidth;
+            height = ghostRegionHeight;
+            xoff = g.xOffset + ghostRegionWidth;
             yoff = g.yOffset;
             break;
         case TOP_RIGHT:
-            width = stencilWidth;
-            height = stencilHeight;
-            xoff = g.xOffset + g.width - stencilWidth;
+            width = ghostRegionWidth;
+            height = ghostRegionHeight;
+            xoff = g.xOffset + g.width - ghostRegionWidth;
             yoff = g.yOffset;
             break;
         case CENTER_LEFT:
-            width = stencilWidth;
-            height = g.height - 2 * stencilHeight;
+            width = ghostRegionWidth;
+            height = g.height - 2 * ghostRegionHeight;
             xoff = g.xOffset; 
-            yoff = g.yOffset + stencilHeight;
+            yoff = g.yOffset + ghostRegionHeight;
             break;
         case CENTER: //core space
-            width = g.width - 2 * stencilWidth;
-            height = g.height - 2 * stencilHeight;
-            xoff = g.xOffset + stencilWidth;
-            yoff = g.yOffset + stencilHeight;
+            width = g.width - 2 * ghostRegionWidth;
+            height = g.height - 2 * ghostRegionHeight;
+            xoff = g.xOffset + ghostRegionWidth;
+            yoff = g.yOffset + ghostRegionHeight;
             break;
         case CENTER_RIGHT:
-            width = stencilWidth;
-            height = g.height - 2 * stencilHeight;
-            xoff = g.xOffset + g.width - stencilWidth;
-            yoff = g.yOffset + stencilHeight;
+            width = ghostRegionWidth;
+            height = g.height - 2 * ghostRegionHeight;
+            xoff = g.xOffset + g.width - ghostRegionWidth;
+            yoff = g.yOffset + ghostRegionHeight;
             break;
         case BOTTOM_LEFT:
-            width = stencilWidth;
-            height = stencilHeight;
+            width = ghostRegionWidth;
+            height = ghostRegionHeight;
             xoff = g.xOffset;
-            yoff = g.yOffset + g.height - stencilHeight;
+            yoff = g.yOffset + g.height - ghostRegionHeight;
             break;
         case BOTTOM_CENTER:
-            width = g.width - 2 * stencilWidth;
-            height = stencilHeight;
-            xoff = g.xOffset + stencilWidth;
-            yoff = g.yOffset + g.height - stencilHeight;
+            width = g.width - 2 * ghostRegionWidth;
+            height = ghostRegionHeight;
+            xoff = g.xOffset + ghostRegionWidth;
+            yoff = g.yOffset + g.height - ghostRegionHeight;
             break;
         case BOTTOM_RIGHT:
-            width = stencilWidth;
-            height = stencilHeight;
-            xoff = g.xOffset + g.width - stencilWidth;
-            yoff = g.yOffset + g.height - stencilHeight;
+            width = ghostRegionWidth;
+            height = ghostRegionHeight;
+            xoff = g.xOffset + g.width - ghostRegionWidth;
+            yoff = g.yOffset + g.height - ghostRegionHeight;
             break;
+        case TOP:
+            width = g.width;
+            height = ghostRegionHeight;
+            xoff = g.xOffset;
+            yoff = g.yOffset;
+            break;
+        case RIGHT:
+            width = ghostRegionWidth;
+            height = g.height;
+            xoff = g.xOffset + g.width - ghostRegionWidth;
+            yoff = g.yOffset;
+            break;
+        case BOTTOM:
+            width = g.width;
+            height = ghostRegionHeight;
+            xoff = g.xOffset;
+            yoff = g.yOffset + g.height - ghostRegionHeight;
+            break;
+        case LEFT:
+            width = ghostRegionWidth;
+            height = g.height;
+            xoff = g.xOffset;
+            yoff = g.yOffset;
+            break; 
         default:
             break; 
     }   
@@ -263,16 +310,16 @@ TransferInfo SendInfo( void* pdata, MPI_Comm cartcomm, int rank, RegionID source
 void ExchangeData( std::vector< TransferInfo >& recvArray,
                    std::vector< TransferInfo >& sendArray ) {
 
-    std::vector< int > requests( recvArray.size() );
+    std::vector< int > requests( recvArray.size() + sendArray.size() );
     for( int i = 0; i != recvArray.size(); ++i ) {
         TransferInfo& t = recvArray[ i ];
         MPI_Irecv( t.data, 1, t.type, t.srcTaskId, t.tag, t.comm, &( requests[ i ] ) );  
     }
-    for( std::vector< TransferInfo >::iterator i = sendArray.begin();
-         i != sendArray.end(); ++i ) {
-        MPI_Isend( i->data, 1, i->type, i->destTaskId, i->tag, i->comm, &( i->request ) );  
+    for( int i = 0; i != sendArray.size(); ++i ) {
+        TransferInfo& t = sendArray[ i ];
+        MPI_Isend( t.data, 1, t.type, t.destTaskId, t.tag, t.comm, &( requests[ recvArray.size() + i ] ) );  
     }
-    std::vector< MPI_Status > status( sendArray.size() );
+    std::vector< MPI_Status > status( recvArray.size() + sendArray.size() );
     MPI_Waitall( requests.size(), &requests[ 0 ], &status[ 0 ] );  
 }
 
@@ -305,18 +352,6 @@ void InitArray( T* pdata, const Array2D& g, const T& value ) {
     }
 }
 
-//------------------------------------------------------------------------------
-template < typename T >
-void Print( T* pdata, const Array2D& g, std::ostream& os ) {
-    Array2DAccessor< T > a( pdata, g );
-    for( int row = 0; row != a.Layout().height; ++row ) {
-        for( int column = 0; column != a.Layout().width; ++column ) {
-            os << a( column, row ) << ' ';
-
-        }
-        os << std::endl;
-    }
-}
 
 //------------------------------------------------------------------------------
 template < typename T >
@@ -329,6 +364,11 @@ bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 //------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
+#if 1
+    void TestSubRegionExtraction();
+    TestSubRegionExtraction();
+#else
+
     int numtasks = 0; 
     // Init, world size     
     MPI_Init( &argc, &argv );
@@ -344,16 +384,18 @@ int main( int argc, char** argv ) {
     // current mpi task id of this process
     int task = -1;
     MPI_Comm_rank( cartcomm, &task );
+    
+    std::cout << task << std::endl;
     std::vector< int > coords( 2, -1 );
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
-    //////////////////////
+    
     // Init data
     int localWidth = 16;
     int localHeight = 16;
     int stencilWidth = 3;
     int stencilHeight = 3;
-    int localTotalWidth = localWidth + 2 * stencilWidth;
-    int localTotalHeight = localHeight + 2 * stencilHeight;
+    int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
+    int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
     std::vector< REAL > dataBuffer( localTotalWidth * localTotalHeight, 0 );  
     Array2D localArray( localTotalWidth, localTotalHeight, localTotalHeight );
     // Create transfer info arrays
@@ -361,7 +403,7 @@ int main( int argc, char** argv ) {
     std::pair< VTI, VTI > transferInfoArrays =
         CreateSendRecvArrays( &dataBuffer[ 0 ], cartcomm, task, localArray, stencilWidth, stencilHeight );     
     Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
-    InitArray( &dataBuffer[ 0 ], core, REAL( task ) ); //init with this MPI task id
+    InitArray( &dataBuffer[ 0 ], core, REAL( task + 1 ) ); //init with this MPI task id
     // Exchange data and compute until condition met
     do {
         ExchangeData( transferInfoArrays.first, transferInfoArrays.second );
@@ -369,18 +411,82 @@ int main( int argc, char** argv ) {
     } while( !TerminateCondition( &dataBuffer[ 0 ], core ) );
 
     MPI_Finalize();
-
     std::ostringstream ss;
     ss << coords[ 0 ] << '_' << coords[ 1 ];
     std::ofstream os( ss.str().c_str() );
-    Print( &dataBuffer[ 0 ], core, os );   
- 
+    Print( &dataBuffer[ 0 ], localArray, os );   
+ #endif
     return 0;
 }
+ 
+//------------------------------------------------------------------------------
+void TestSubRegionExtraction() {
+    const int w = 32;
+    const int h = 32;
+    const int stencilWidth = 5;
+    const int stencilHeight = 5;
+    const int totalWidth = w + stencilWidth / 2;
+    const int totalHeight = h + stencilHeight / 2;
+    std::vector< int > data( totalWidth * totalHeight, 0 );
+    Array2D grid( totalWidth, totalHeight, totalWidth );
+    Array2D topleft = SubArrayRegion( grid, stencilWidth, stencilHeight, TOP_LEFT );
+    Array2D topcenter = SubArrayRegion( grid, stencilWidth, stencilHeight, TOP_CENTER );
+    Array2D topright= SubArrayRegion( grid, stencilWidth, stencilHeight, TOP_RIGHT );
+    Array2D centerleft = SubArrayRegion( grid, stencilWidth, stencilHeight, CENTER_LEFT );
+    Array2D center = SubArrayRegion( grid, stencilWidth, stencilHeight, CENTER );
+    Array2D centerright = SubArrayRegion( grid, stencilWidth, stencilHeight, CENTER_RIGHT );
+    Array2D bottomleft = SubArrayRegion( grid, stencilWidth, stencilHeight, BOTTOM_LEFT );
+    Array2D bottomcenter = SubArrayRegion( grid, stencilWidth, stencilHeight, BOTTOM_CENTER );
+    Array2D bottomright = SubArrayRegion( grid, stencilWidth, stencilHeight, BOTTOM_RIGHT );
+  
+    std::cout << "\nGRID TEST\n";
+    
+    std::cout << "Width: " << totalWidth << ", " << "Height: " << totalHeight << std::endl;
+    std::cout << "Stencil: " << stencilWidth << ", " << stencilHeight << std::endl;
+ 
+    std::cout << "top left:      " << topleft      << std::endl;
+    std::cout << "top center:    " << topcenter    << std::endl;
+    std::cout << "top right:     " << topright     << std::endl;
+    std::cout << "center left:   " << centerleft   << std::endl;
+    std::cout << "center:        " << center       << std::endl;
+    std::cout << "center right:  " << centerright  << std::endl;
+    std::cout << "bottom left:   " << bottomleft   << std::endl;
+    std::cout << "bottom center: " << bottomcenter << std::endl;
+    std::cout << "bottom right:  " << bottomright  << std::endl;
 
+    std::cout << "\nSUBGRID TEST\n";
 
+    Array2D core = center;
+    topleft = SubArrayRegion( core, stencilWidth, stencilHeight, TOP_LEFT );
+    topcenter = SubArrayRegion( core, stencilWidth, stencilHeight, TOP_CENTER );
+    topright= SubArrayRegion( core, stencilWidth, stencilHeight, TOP_RIGHT );
+    centerleft = SubArrayRegion( core, stencilWidth, stencilHeight, CENTER_LEFT );
+    center = SubArrayRegion( core, stencilWidth, stencilHeight, CENTER );
+    centerright = SubArrayRegion( core, stencilWidth, stencilHeight, CENTER_RIGHT );
+    bottomleft = SubArrayRegion( core, stencilWidth, stencilHeight, BOTTOM_LEFT );
+    bottomcenter = SubArrayRegion( core, stencilWidth, stencilHeight, BOTTOM_CENTER );
+    bottomright = SubArrayRegion( core, stencilWidth, stencilHeight, BOTTOM_RIGHT );
+    Array2D top = SubArrayRegion( core, stencilWidth, stencilHeight, TOP );
+    Array2D right = SubArrayRegion( core, stencilWidth, stencilHeight, RIGHT );
+    Array2D bottom = SubArrayRegion( core, stencilWidth, stencilHeight, BOTTOM );
+    Array2D left = SubArrayRegion( core, stencilWidth, stencilHeight, LEFT );
 
+    std::cout << "Width: " << core.width << ", " << "Height: " << core.height << std::endl;
+    std::cout << "Stencil: " << stencilWidth << ", " << stencilHeight << std::endl;
+    
+    std::cout << "top left:      " << topleft      << std::endl;
+    std::cout << "top center:    " << topcenter    << std::endl;
+    std::cout << "top right:     " << topright     << std::endl;
+    std::cout << "center left:   " << centerleft   << std::endl;
+    std::cout << "center:        " << center       << std::endl;
+    std::cout << "center right:  " << centerright  << std::endl;
+    std::cout << "bottom left:   " << bottomleft   << std::endl;
+    std::cout << "bottom center: " << bottomcenter << std::endl;
+    std::cout << "bottom right:  " << bottomright  << std::endl;
+    std::cout << "top:           " << top          << std::endl;
+    std::cout << "right:         " << right        << std::endl;
+    std::cout << "bottom:        " << bottom       << std::endl;
+    std::cout << "left:          " << left         << std::endl;
 
-
-
+}
 
