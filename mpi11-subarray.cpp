@@ -11,28 +11,42 @@
 
 typedef double REAL;
 
+
 //------------------------------------------------------------------------------
-struct Grid2D {
+struct Array2D {
     int width;
     int height;
     int xOffset;
     int yOffset;
     int rowStride;
-    REAL*  data;
-    Grid2D( REAL* d, int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
-        data( d ), width( w ), height( h ), xOffset( xoff ), yOffset( yoff ),
+    Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
+        width( w ), height( h ), xOffset( xoff ), yOffset( yoff ),
         rowStride( rs )
     {}
-    Grid2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ), data( 0 ),
-               rowStride( 0 )
+    Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
     {}
-    REAL operator()( int x, int y ) const { 
-        return *( data + ( yOffset + y ) * rowStride + xOffset + x ); 
-    }
-    REAL& operator()( int x, int y ) {
-        return *( data + ( yOffset + y ) * rowStride + xOffset + x ); 
-    }
+};
 
+//------------------------------------------------------------------------------
+template < typename T >
+class Array2DAccessor {
+public:
+    const T& operator()( int x, int y ) const { 
+        return *( data_ + 
+                  ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
+                    layout_.rowStride * y + x ); 
+    }
+    T& operator()( int x, int y ) {
+        return *( data_ + 
+                  ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
+                  layout_.rowStride * y + x ); 
+    }
+    Array2DAccessor() : data_( 0 ) {}
+    Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
+    const Array2D& Layout() const { return layout_; }
+private:
+    Array2D layout_;
+    T* data_;
 };
 
 //------------------------------------------------------------------------------
@@ -42,10 +56,10 @@ enum RegionID { TOP_LEFT,    TOP_CENTER,    TOP_RIGHT,
 
 //------------------------------------------------------------------------------
 //Possible to use templated function specialized with RegionID
-Grid2D SubGridRegion( const Grid2D& g, 
-                      int stencilWidth, 
-                      int stencilHeight,
-                      RegionID rid ) {
+Array2D SubArrayRegion( const Array2D& g, 
+                        int stencilWidth, 
+                        int stencilHeight,
+                        RegionID rid ) {
     int width = 0;
     int height = 0;
     int xoff = 0;
@@ -110,7 +124,7 @@ Grid2D SubGridRegion( const Grid2D& g,
         default:
             break; 
     }   
-    return Grid2D( g.data, width, height, stride, xoff, yoff );
+    return Array2D( width, height, stride, xoff, yoff );
 }
 
 //------------------------------------------------------------------------------
@@ -119,7 +133,7 @@ template < typename T > MPI_Datatype CreateArrayElementType();
 template <> MPI_Datatype CreateArrayElementType< REAL >() { return MPI_DOUBLE_PRECISION; }
 
 //------------------------------------------------------------------------------
-MPI_Datatype CreateMPISubArrayType( const Grid2D& g, const Grid2D& subgrid ) {
+MPI_Datatype CreateMPISubArrayType( const Array2D& g, const Array2D& subgrid ) {
     int dimensions = 2;
     int sizes[] = { g.width, g.height };
     int subsizes[] = { subgrid.width, subgrid.height };
@@ -213,31 +227,31 @@ struct TransferInfo {
 };
 
 //------------------------------------------------------------------------------
-TransferInfo ReceiveInfo( MPI_Comm cartcomm, int rank, RegionID target, Grid2D& g,
+TransferInfo ReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank, RegionID target, Array2D& g,
                           int stencilWidth, int stencilHeight ) {
     TransferInfo ti;
     ti.comm = cartcomm;
-    ti.data = g.data;
+    ti.data = pdata;
     ti.destTaskId = rank;
     ti.tag = target;
     ti.type = CreateMPISubArrayType( g, 
-                                     SubGridRegion( g, stencilWidth, stencilHeight, target ) );
+                                     SubArrayRegion( g, stencilWidth, stencilHeight, target ) );
     Offset offset = OffsetRegion( target ); 
     ti.srcTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
     return ti;     
 }
  
 //------------------------------------------------------------------------------
-TransferInfo SendInfo( MPI_Comm cartcomm, int rank, RegionID source, Grid2D& g,
+TransferInfo SendInfo( void* pdata, MPI_Comm cartcomm, int rank, RegionID source, Array2D& g,
                        int stencilWidth, int stencilHeight ) {
     TransferInfo ti;
     ti.comm = cartcomm;
-    ti.data = g.data;
+    ti.data = pdata;
     ti.srcTaskId = rank;
     ti.tag = source;
-    Grid2D core = SubGridRegion( g, stencilWidth, stencilHeight, CENTER );
+    Array2D core = SubArrayRegion( g, stencilWidth, stencilHeight, CENTER );
     ti.type = CreateMPISubArrayType( g, 
-                                     SubGridRegion( core, stencilWidth, stencilHeight, source ) );
+                                     SubArrayRegion( core, stencilWidth, stencilHeight, source ) );
     Offset offset = OffsetRegion( source ); 
     ti.destTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
     return ti;     
@@ -263,7 +277,7 @@ void ExchangeData( std::vector< TransferInfo >& recvArray,
 //------------------------------------------------------------------------------
 std::pair< std::vector< TransferInfo >,
            std::vector< TransferInfo > > 
-CreateSendRecvArrays( MPI_Comm cartcomm, int rank, Grid2D& g,
+CreateSendRecvArrays( void* pdata, MPI_Comm cartcomm, int rank, Array2D& g,
                       int stencilWidth, int stencilHeight ) {
     std::vector< TransferInfo > ra;
     std::vector< TransferInfo > sa;
@@ -271,22 +285,31 @@ CreateSendRecvArrays( MPI_Comm cartcomm, int rank, Grid2D& g,
                         CENTER_LEFT, CENTER,        CENTER_RIGHT,
                         BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT };
     for( RegionID* i = rids; i != rids + sizeof( rids ) / sizeof( RegionID ); ++i ) {
-        ra.push_back( ReceiveInfo( cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
-        sa.push_back( SendInfo( cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
+        ra.push_back( ReceiveInfo( pdata, cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
+        sa.push_back( SendInfo( pdata, cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
     }
     return std::make_pair( ra, sa ); 
 }
 
 //------------------------------------------------------------------------------
-void InitGrid( Grid2D& g ) {
+template < typename T >
+void InitArray( T* pdata, const Array2D& g, const T& value ) {
+    Array2DAccessor< T > a( pdata, g );
+    for( int row = 0; row != a.Layout().height; ++row ) {
+        for( int column = 0; column != a.Layout().width; ++column ) {
+            a( column, row ) = value;
 
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
-void Compute( Grid2D& g ) {}
+template < typename T >
+void Compute( T* pdata, const Array2D& g ) {}
 
 //------------------------------------------------------------------------------
-bool TerminateCondition( const Grid2D& /*g*/ ) { return true; }
+template < typename T >
+bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 
 //------------------------------------------------------------------------------
@@ -316,19 +339,21 @@ int main( int argc, char** argv ) {
     int stencilHeight = 3;
     int localTotalWidth = localWidth + 2 * stencilWidth;
     int localTotalHeight = localHeight + 2 * stencilHeight;
-    std::vector< REAL > buffer( localTotalWidth * localTotalHeight, 0 );  
-    Grid2D localGrid( &buffer[ 0 ], localTotalWidth, localTotalHeight, localTotalHeight );
+    std::vector< REAL > dataBuffer( localTotalWidth * localTotalHeight, 0 );  
+    Array2D localArray( localTotalWidth, localTotalHeight, localTotalHeight );
     // Create transfer info arrays
     typedef std::vector< TransferInfo > VTI;
-    std::pair< VTI, VTI > infoArrays =
-        CreateSendRecvArrays( cartcomm, task, localGrid, stencilWidth, stencilHeight );     
-    Grid2D core = SubGridRegion( localGrid, stencilWidth, stencilHeight, CENTER );
-    InitGrid( core );
-    ///////////////////////
+    std::pair< VTI, VTI > transferInfoArrays =
+        CreateSendRecvArrays( &dataBuffer[ 0 ], cartcomm, task, localArray, stencilWidth, stencilHeight );     
+    Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
+    InitArray( &dataBuffer[ 0 ], core, REAL( task ) ); //init with this MPI task id
+    // Exchange data and compute until condition met
     do {
-        ExchangeData( infoArrays.first, infoArrays.second );
-        Compute( core );
-    } while( !TerminateCondition( core ) );
+        ExchangeData( transferInfoArrays.first, transferInfoArrays.second );
+        Compute( &dataBuffer[ 0 ], core );
+    } while( !TerminateCondition( &dataBuffer[ 0 ], core ) );
+
+    MPI_Finalize();
     
     return 0;
 }
