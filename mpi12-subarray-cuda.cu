@@ -21,10 +21,12 @@ struct Array2D {
     int xOffset;
     int yOffset;
     int rowStride;
+    __host__ __device__
     Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
         width( w ), height( h ), xOffset( xoff ), yOffset( yoff ),
         rowStride( rs )
     {}
+    __host__ __device__
     Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
     {}
 };
@@ -41,19 +43,24 @@ std::ostream& operator<<( std::ostream& os, const Array2D& a ) {
 template < typename T >
 class Array2DAccessor {
 public:
+    __host__ __device__
     const T& operator()( int x, int y ) const { 
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                     layout_.rowStride * y + x ); 
     }
+    __host__ __device__
     T& operator()( int x, int y ) {
         
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                   layout_.rowStride * y + x ); 
     }
+    __host__ __device__
     Array2DAccessor() : data_( 0 ) {}
+    __host__ __device__
     Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
+    __host__ __device__
     const Array2D& Layout() const { return layout_; }
 private:
     Array2D layout_;
@@ -372,10 +379,10 @@ CreateSendRecvArrays( void* pdata, MPI_Comm cartcomm, int rank, Array2D& g,
 
 //------------------------------------------------------------------------------
 template < typename T >
-__global void InitData( T* pdata, Array2D layout, int value ) {
+__global__ void InitData( T* pdata, Array2D layout, int value ) {
     const int row = blockIdx.y * blockDim.y + threadIdx.y;
     const int column =  blockIdx.x * blockDim.x + threadIdx.x;
-    Array2DAccessor a( pdata, layout );
+    Array2DAccessor< T > a( pdata, layout );
     a( column, row ) = value;
 }
 
@@ -433,8 +440,9 @@ int main( int argc, char** argv ) {
     int stencilHeight = 5;
     int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
     int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
-    REAL* deviceBuffer = cudaMalloc( localTotalWidth * localTotalHeight * sizeof( REAL ) );
-    cudaMemset( deviceBuffer, 0, localTotallWidth * localTotalHeight * sizeof( REAL ) );   
+    REAL* deviceBuffer = 0;
+    cudaMalloc( &deviceBuffer, localTotalWidth * localTotalHeight * sizeof( REAL ) );
+    cudaMemset( deviceBuffer, 0, localTotalWidth * localTotalHeight * sizeof( REAL ) );   
     Array2D localArray( localTotalWidth, localTotalHeight, localTotalWidth );
     // Create transfer info arrays
     typedef std::vector< TransferInfo > VTI;
@@ -444,7 +452,7 @@ int main( int argc, char** argv ) {
     InitArray( deviceBuffer, core, REAL( task + 1 ) ); //init with this MPI task id
     os << "Array" << std::endl;
     std::vector< REAL > hostBuffer( localArray.width * localArray.height );
-    cudaMempcy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
+    cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
                 cudaMemcpyDeviceToHost );
     Print( &hostBuffer[ 0 ], localArray, os );
     os << std::endl;
@@ -455,7 +463,7 @@ int main( int argc, char** argv ) {
     } while( !TerminateCondition( deviceBuffer, core ) );
     os << "Array after exchange" << std::endl;    
     MPI_Finalize();
-    cudaMempcy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
+    cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
                 cudaMemcpyDeviceToHost );
     Print( &hostBuffer[ 0 ], localArray, os );   
  #endif
