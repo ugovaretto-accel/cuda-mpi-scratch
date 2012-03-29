@@ -261,7 +261,8 @@ void ExchangeData( std::vector< TransferInfo >& recvArray,
 }
 
 //------------------------------------------------------------------------------
-std::pair< std::vector< TransferInfo > > 
+std::pair< std::vector< TransferInfo >,
+           std::vector< TransferInfo > > 
 CreateSendRecvArrays( MPI_Comm cartcomm, int rank, Grid2D& g,
                       int stencilWidth, int stencilHeight ) {
     std::vector< TransferInfo > ra;
@@ -273,7 +274,7 @@ CreateSendRecvArrays( MPI_Comm cartcomm, int rank, Grid2D& g,
         ra.push_back( ReceiveInfo( cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
         sa.push_back( SendInfo( cartcomm, rank, *i, g, stencilWidth, stencilHeight ) );   
     }
-    return std::makepair( ra, sa ); 
+    return std::make_pair( ra, sa ); 
 }
 
 //------------------------------------------------------------------------------
@@ -318,13 +319,14 @@ int main( int argc, char** argv ) {
     std::vector< REAL > buffer( localTotalWidth * localTotalHeight, 0 );  
     Grid2D localGrid( &buffer[ 0 ], localTotalWidth, localTotalHeight, localTotalHeight );
     // Create transfer info arrays
-    std::pair< std::vector< TransferInfo > > infoArrays =
-        CreateSendRecvArrays( cartcomm, task, grid, stencilWidth, stencilHeight );     
-    Grid2D core = SubGridRegion( grid, stencilWidth, stencilHeight, CENTER );
+    typedef std::vector< TransferInfo > VTI;
+    std::pair< VTI, VTI > infoArrays =
+        CreateSendRecvArrays( cartcomm, task, localGrid, stencilWidth, stencilHeight );     
+    Grid2D core = SubGridRegion( localGrid, stencilWidth, stencilHeight, CENTER );
     InitGrid( core );
     ///////////////////////
     do {
-        ExchangeData( infoArray.first, infoArray.second );
+        ExchangeData( infoArrays.first, infoArrays.second );
         Compute( core );
     } while( !TerminateCondition( core ) );
     
