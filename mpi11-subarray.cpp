@@ -309,19 +309,10 @@ struct TransferInfo {
 
 //------------------------------------------------------------------------------
 // Create entry with information for data transfer from a remote MPI task
-// to a local memory area inside the local 2d array
-// IN: 
-//   . remote region to read from
-//   . local region to write data into
-//   . current MPI rank
-//   . local array pointer and layout
-// OUT:
-//   .  transfer information including source MPI task and MPI datatype
-//      matching the sub-array type of the receive memory area
-// This function computes the MPI source rank from information on the remote
-// region we want to read from: E.g. if a BOTTOM_RIGHT region is requested it
-// automatically figures out that the MPI task that owns the memory region to copy
-// from is in the 
+// to a local subregion of a 2d array
+// IN: remote MPI task, local target memory region, data pointer, sub-array layout
+// OUT: transfer information including endpoints and MPI datatype matching the
+//      2d array layout passed as input 
 TransferInfo CreateReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank, 
 			        MPIGridCellID remoteSource, RegionID localTargetRegion,
                                 Array2D& g, int stencilWidth, int stencilHeight, int tag ) {
@@ -343,6 +334,9 @@ TransferInfo CreateReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank,
 //------------------------------------------------------------------------------
 // Create entry with information for data transfer from a local memory area
 // inside the core space(local grid minus ghost regions) to a remote MPI task
+// IN: local region, remote MPI task, data pointer, sub-array layout
+// OUT: transfer information including endpoints and MPI datatype matching the
+//      2d array layout passed as input 
 TransferInfo CreateSendInfo( void* pdata, MPI_Comm cartcomm, int rank, 
                              MPIGridCellID remoteTarget, RegionID localSourceRegion, Array2D& g,
                              int stencilWidth, int stencilHeight, int tag ) {
