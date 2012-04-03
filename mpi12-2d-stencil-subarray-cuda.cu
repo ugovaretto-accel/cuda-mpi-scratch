@@ -58,7 +58,15 @@ int main( int argc, char** argv ) {
     // current mpi task id of this process
     int task = -1;
     MPI_Comm_rank( cartcomm, &task );
-    
+   
+    int numDevices = 0;
+    cudaGetDeviceCount( &numDevices );
+    if( numDevices < 1 ) {
+        std::cerr << "No CUDA devices found" << std::endl;
+        return 1;
+    }
+    cudaSetDevice( task % numDevices );
+
     std::vector< int > coords( 2, -1 );
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
       
