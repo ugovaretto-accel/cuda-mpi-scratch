@@ -497,6 +497,9 @@ int main( int argc, char** argv ) {
         CreateSendRecvArrays( &dataBuffer[ 0 ], cartcomm, task, localArray, stencilWidth, stencilHeight );     
     Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
     InitArray( &dataBuffer[ 0 ], core, REAL( task ) ); //init with this MPI task id
+    os << localWidth << " x " << localHeight << " grid size" << std::endl; 
+    os << localTotalWidth << " x " << localTotalHeight << " total(with ghost/halo regions) grid size" << std::endl; 
+    os << stencilWidth << " x " << stencilHeight << " stencil\n" << std::endl;
     os << "Array" << std::endl;
     Print( &dataBuffer[ 0 ], localArray, os );
     os << std::endl;

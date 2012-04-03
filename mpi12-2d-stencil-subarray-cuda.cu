@@ -13,6 +13,7 @@
 
 typedef double REAL;
 
+#define ACC_ __host__ __device__
 
 //------------------------------------------------------------------------------
 // 2D layout information
@@ -22,11 +23,11 @@ struct Array2D {
     int xOffset;
     int yOffset;
     int rowStride; // currently not used
-    Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
+    ACC_ Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
         width( w ), height( h ), xOffset( xoff ), yOffset( yoff ),
         rowStride( rs )
     {}
-    Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
+    ACC_ Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
     {}
 };
 
@@ -44,20 +45,20 @@ std::ostream& operator<<( std::ostream& os, const Array2D& a ) {
 template < typename T >
 class Array2DAccessor {
 public:
-    const T& operator()( int x, int y ) const { 
+    ACC_ const T& operator()( int x, int y ) const { 
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                     layout_.rowStride * y + x ); 
     }
-    T& operator()( int x, int y ) {
+    ACC_ T& operator()( int x, int y ) {
         
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                   layout_.rowStride * y + x ); 
     }
-    Array2DAccessor() : data_( 0 ) {}
-    Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
-    const Array2D& Layout() const { return layout_; }
+    ACC_ Array2DAccessor() : data_( 0 ) {}
+    ACC_ Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
+    ACC_ const Array2D& Layout() const { return layout_; }
 private:
     Array2D layout_;
     T* data_;
@@ -431,13 +432,7 @@ __global__ void InitKernel( T* pdata, Array2D layout, T value ) {
 
 template < typename T >
 void InitArray( T* pdata, const Array2D& g, const T& value ) {
-    Array2DAccessor< T > a( pdata, g );
-    for( int row = 0; row != a.Layout().height; ++row ) {
-        for( int column = 0; column != a.Layout().width; ++column ) {
-            a( column, row ) = value;
-
-        }
-    }
+    InitKernel<<< dim3( g.width, g.height, 1 ), 1 >>>( pdata, g, value );
 }
 
 
@@ -503,13 +498,17 @@ int main( int argc, char** argv ) {
     std::vector< REAL > hostBuffer( localTotalSize, -1 );  
     REAL* deviceBuffer = 0;
     cudaMalloc( &deviceBuffer, localTotalByteSize );
-    cudaMemcpy( &deviceBuffer, &hostBuffer[ 0 ], localTotalByteSize, cudaMemcpyHostToDevice );
+    cudaMemcpy( deviceBuffer, &hostBuffer[ 0 ], localTotalByteSize, cudaMemcpyHostToDevice );
     // Create transfer info arrays
     typedef std::vector< TransferInfo > VTI;
     std::pair< VTI, VTI > transferInfoArrays =
         CreateSendRecvArrays( deviceBuffer, cartcomm, task, localArray, stencilWidth, stencilHeight );     
     Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
     InitArray( &deviceBuffer[ 0 ], core, REAL( task ) ); //init with this MPI task id
+    
+    os << localWidth << " x " << localHeight << " grid size" << std::endl; 
+    os << localTotalWidth << " x " << localTotalHeight << " total(with ghost/halo regions) grid size" << std::endl; 
+    os << stencilWidth << " x " << stencilHeight << " stencil\n" << std::endl;
     os << "Array" << std::endl;
     cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localTotalByteSize, cudaMemcpyDeviceToHost );
     Print( &hostBuffer[ 0 ], localArray, os );
@@ -518,7 +517,7 @@ int main( int argc, char** argv ) {
     do {
         ExchangeData( transferInfoArrays.first, transferInfoArrays.second );
         Compute( &deviceBuffer, core );
-    } while(false);// !TerminateCondition< REAL >( deviceBuffer core ) );
+    } while( !TerminateCondition( deviceBuffer, core ) );
     os << "Array after exchange" << std::endl;    
     MPI_Finalize();
     cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localTotalByteSize, cudaMemcpyDeviceToHost );
