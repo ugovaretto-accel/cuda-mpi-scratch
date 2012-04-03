@@ -71,6 +71,12 @@ enum RegionID { TOP_LEFT,    TOP_CENTER,    TOP_RIGHT,
                 TOP, LEFT, BOTTOM, RIGHT };
 
 //------------------------------------------------------------------------------
+// MPI grid cell  ids: Used to identify neighbors in the global MPI cartesian grid
+enum MPIGridCellID { MPI_TOP_LEFT,    MPI_TOP_CENTER,    MPI_TOP_RIGHT,
+                     MPI_CENTER_LEFT,                    MPI_CENTER_RIGHT,
+                     MPI_BOTTOM_LEFT, MPI_BOTTOM_CENTER, MPI_BOTTOM_RIGHT };
+
+//------------------------------------------------------------------------------
 // Print content of 2D array given pointer to data and layout info
 template < typename T >
 void Print( T* pdata, const Array2D& g, std::ostream& os ) {
@@ -237,58 +243,42 @@ struct Offset {
 // of the local grid;
 // assuming a row-major top-to-bottom MPI compute grid
 // i.e. topmost row is 0 
-Offset MPIOffsetRegion( RegionID rid ) {
+Offset MPIOffsetRegion( MPIGridCellID mpicid ) {
     int xoff = 0;
     int yoff = 0;
-    switch( rid ) {
-    case TOP_LEFT:
+    switch( mpicid ) {
+    case MPI_TOP_LEFT:
         xoff =  -1;
         yoff =  -1;
         break;
-    case TOP_CENTER:
+    case MPI_TOP_CENTER:
         xoff =  0;
         yoff = -1;
         break;
-    case TOP_RIGHT:
+    case MPI_TOP_RIGHT:
         xoff =  1;
         yoff = -1;
         break;
-    case CENTER_LEFT:
+    case MPI_CENTER_LEFT:
         xoff = -1;
         yoff =  0;
         break;
-    case CENTER_RIGHT:
+    case MPI_CENTER_RIGHT:
         xoff = 1;
         yoff = 0;
         break;
-    case BOTTOM_LEFT:
+    case MPI_BOTTOM_LEFT:
         xoff = -1;
         yoff =  1;
         break;
-    case BOTTOM_CENTER:
+    case MPI_BOTTOM_CENTER:
         xoff =  0;
         yoff =  1;
         break;
-    case BOTTOM_RIGHT:
+    case MPI_BOTTOM_RIGHT:
         xoff =  1;
         yoff =  1;
         break;
-    case TOP:
-        xoff =  0;
-        yoff = -1;
-        break;
-    case RIGHT:
-        xoff = -1;
-        yoff =  0;
-        break;
-    case BOTTOM:
-        xoff = 0;
-        yoff = 1;
-        break;
-    case LEFT:
-        xoff = -1;
-        yoff =  0;
-        break; 
     default:
         break;
     }
