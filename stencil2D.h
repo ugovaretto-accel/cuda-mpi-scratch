@@ -1,4 +1,11 @@
-// mvapich2 gpu to gpu communication 
+#pragma once
+
+// author: Ugo Varetto
+//
+// utility functions for 2D stencil computations on regular grids with 
+// direct GPU-GPU data exchange
+//
+// intended for use with mvapich2 version >= 1.8RC1
 
 #include <mpi.h>
 #include <iostream>
@@ -11,23 +18,26 @@
 #include <fstream>
 #include <sstream>
 
-typedef double REAL;
+#ifdef __CUDACC__
+#define ACC_ __host__ __device__
+#else
+#define ACC_
+#endif
 
 
 //------------------------------------------------------------------------------
+// 2D layout information
 struct Array2D {
     int width;
     int height;
     int xOffset;
     int yOffset;
-    int rowStride;
-    __host__ __device__
-    Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
+    int rowStride; // currently not used
+    ACC_ Array2D( int w, int h, int rs, int xoff = 0, int yoff = 0 ) :
         width( w ), height( h ), xOffset( xoff ), yOffset( yoff ),
         rowStride( rs )
     {}
-    __host__ __device__
-    Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
+    ACC_ Array2D() : width( 0 ), height( 0 ), xOffset( 0 ), yOffset( 0 ),rowStride( 0 )
     {}
 };
 
@@ -40,40 +50,45 @@ std::ostream& operator<<( std::ostream& os, const Array2D& a ) {
 }
 
 //------------------------------------------------------------------------------
+// Accessor for 2D arrays: Allow for random access to 2D domain given pointer 
+// and layout information 
 template < typename T >
 class Array2DAccessor {
 public:
-    __host__ __device__
-    const T& operator()( int x, int y ) const { 
+    ACC_ const T& operator()( int x, int y ) const { 
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                     layout_.rowStride * y + x ); 
     }
-    __host__ __device__
-    T& operator()( int x, int y ) {
+    ACC_ T& operator()( int x, int y ) {
         
         return *( data_ + 
                   ( layout_.yOffset * layout_.rowStride + layout_.xOffset ) + //constant
                   layout_.rowStride * y + x ); 
     }
-    __host__ __device__
-    Array2DAccessor() : data_( 0 ) {}
-    __host__ __device__
-    Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
-    __host__ __device__
-    const Array2D& Layout() const { return layout_; }
+    ACC_ Array2DAccessor() : data_( 0 ) {}
+    ACC_ Array2DAccessor( T* data, const Array2D& layout ) : data_( data ), layout_( layout) {}
+    ACC_ const Array2D& Layout() const { return layout_; }
 private:
     Array2D layout_;
     T* data_;
 };
 
 //------------------------------------------------------------------------------
+// Region ids: Used to identify areas in the local grid
 enum RegionID { TOP_LEFT,    TOP_CENTER,    TOP_RIGHT,
                 CENTER_LEFT, CENTER,        CENTER_RIGHT,
                 BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT,
                 TOP, LEFT, BOTTOM, RIGHT };
 
 //------------------------------------------------------------------------------
+// MPI grid cell  ids: Used to identify neighbors in the global MPI cartesian grid
+enum MPIGridCellID { MPI_TOP_LEFT,    MPI_TOP_CENTER,    MPI_TOP_RIGHT,
+                     MPI_CENTER_LEFT,                    MPI_CENTER_RIGHT,
+                     MPI_BOTTOM_LEFT, MPI_BOTTOM_CENTER, MPI_BOTTOM_RIGHT };
+
+//------------------------------------------------------------------------------
+// Print content of 2D array given pointer to data and layout info
 template < typename T >
 void Print( T* pdata, const Array2D& g, std::ostream& os ) {
     Array2DAccessor< T > a( pdata, g );
@@ -87,11 +102,12 @@ void Print( T* pdata, const Array2D& g, std::ostream& os ) {
 }
 
 //------------------------------------------------------------------------------
+//Compute Array2D layout from region id of local grid
 //Possible to use templated function specialized with RegionID
-Array2D SubArrayRegion( const Array2D& g, 
-                        int stencilWidth, 
-                        int stencilHeight,
-                        RegionID rid ) {
+inline Array2D SubArrayRegion( const Array2D& g, 
+                               int stencilWidth, 
+                               int stencilHeight,
+                               RegionID rid ) {
     int width = 0;
     int height = 0;
     int xoff = 0;
@@ -187,16 +203,17 @@ Array2D SubArrayRegion( const Array2D& g,
 //------------------------------------------------------------------------------
 template < typename T > MPI_Datatype CreateArrayElementType();
 
-template <> MPI_Datatype CreateArrayElementType< REAL >() { return MPI_DOUBLE_PRECISION; }
+template <> MPI_Datatype CreateArrayElementType< double >() { return MPI_DOUBLE_PRECISION; }
 
 //------------------------------------------------------------------------------
+template < typename T >
 MPI_Datatype CreateMPISubArrayType( const Array2D& g, const Array2D& subgrid ) {
     int dimensions = 2;
     int sizes[] = { g.width, g.height };
     int subsizes[] = { subgrid.width, subgrid.height };
     int offsets[] = { subgrid.xOffset, subgrid.yOffset };
     int order = MPI_ORDER_C;
-    MPI_Datatype arrayElementType = CreateArrayElementType< REAL >();// array element type
+    MPI_Datatype arrayElementType = CreateArrayElementType< T >();// array element type
     MPI_Datatype newtype;
     MPI_Type_create_subarray( dimensions,
                               sizes,
@@ -210,7 +227,8 @@ MPI_Datatype CreateMPISubArrayType( const Array2D& g, const Array2D& subgrid ) {
 }
 
 //------------------------------------------------------------------------------
-int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
+// Return MPI task id from offset in MPI cartesian grid
+inline int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
     int thisRank = -1;
     MPI_Comm_rank( MPI_COMM_WORLD, &thisRank );
     int coord[] = { -1, -1 }; 
@@ -226,64 +244,53 @@ int OffsetTaskId( MPI_Comm comm, int xOffset, int yOffset ) {
 
 
 //------------------------------------------------------------------------------
+// Offset from current MPI taks in MPI cartesian grid
 struct Offset {
     int x;
     int y;
     Offset( int ox, int oy ) : x( ox ), y( oy ) {}
 };
 
-Offset OffsetRegion( RegionID rid ) {
+// compute the offset in the MPI grid from the Region id
+// of the local grid;
+// assuming a row-major top-to-bottom MPI compute grid
+// i.e. topmost row is 0 
+inline Offset MPIOffsetRegion( MPIGridCellID mpicid ) {
     int xoff = 0;
     int yoff = 0;
-    switch( rid ) {
-    case TOP_LEFT:
-        xoff = -1;
-        yoff =  1;
+    switch( mpicid ) {
+    case MPI_TOP_LEFT:
+        xoff =  -1;
+        yoff =  -1;
         break;
-    case TOP_CENTER:
-        xoff = 0;
-        yoff = 1;
-        break;
-    case TOP_RIGHT:
-        xoff = 1;
-        yoff = 1;
-        break;
-    case CENTER_LEFT:
-        xoff = -1;
-        yoff =  0;
-        break;
-    case CENTER_RIGHT:
-        xoff = 1;
-        yoff = 0;
-        break;
-    case BOTTOM_LEFT:
-        xoff = -1;
-        yoff = -1;
-        break;
-    case BOTTOM_CENTER:
+    case MPI_TOP_CENTER:
         xoff =  0;
         yoff = -1;
         break;
-    case BOTTOM_RIGHT:
+    case MPI_TOP_RIGHT:
         xoff =  1;
         yoff = -1;
         break;
-    case TOP:
-        xoff = 0;
-        yoff = 1;
+    case MPI_CENTER_LEFT:
+        xoff = -1;
+        yoff =  0;
         break;
-    case RIGHT:
+    case MPI_CENTER_RIGHT:
         xoff = 1;
         yoff = 0;
         break;
-    case BOTTOM:
-        xoff = 0;
-        yoff = -1;
-        break;
-    case LEFT:
+    case MPI_BOTTOM_LEFT:
         xoff = -1;
-        yoff = 0;
-        break; 
+        yoff =  1;
+        break;
+    case MPI_BOTTOM_CENTER:
+        xoff =  0;
+        yoff =  1;
+        break;
+    case MPI_BOTTOM_RIGHT:
+        xoff =  1;
+        yoff =  1;
+        break;
     default:
         break;
     }
@@ -291,55 +298,69 @@ Offset OffsetRegion( RegionID rid ) {
 }
 
 //------------------------------------------------------------------------------
+// Danta transfer information to be used by MPI send/receive operations
 struct TransferInfo {
     int srcTaskId;
     int destTaskId;
     int tag;
     void* data;
-    MPI_Request request;
+    MPI_Request request; // currently not used
     MPI_Datatype type;
     MPI_Comm comm;
 };
 
 //------------------------------------------------------------------------------
-TransferInfo ReceiveInfo( void* pdata, MPI_Comm cartcomm, int rank, 
-                          RegionID source, RegionID target, Array2D& g,
-                          int stencilWidth, int stencilHeight, int tag ) {
+// Create entry with information for data transfer from a remote MPI task
+// to a local subregion of a 2d array
+// IN: remote MPI task, local target memory region, data pointer, sub-array layout
+// OUT: transfer information including endpoints and MPI datatype matching the
+//      2d array layout passed as input 
+template < typename T > 
+TransferInfo CreateReceiveInfo( T* pdata, MPI_Comm cartcomm, int rank, 
+			        MPIGridCellID remoteSource, RegionID localTargetRegion,
+                                Array2D& g, int stencilWidth, int stencilHeight, int tag ) {
     TransferInfo ti;
     ti.comm = cartcomm;
     ti.data = pdata;
     ti.destTaskId = rank;
     ti.tag = tag;
-    ti.type = CreateMPISubArrayType( g, 
-                                     SubArrayRegion( g, stencilWidth, stencilHeight, target ) );
-    Offset offset = OffsetRegion( source ); 
+    ti.type = CreateMPISubArrayType< T >( g, 
+                                          SubArrayRegion( g, stencilWidth, stencilHeight, localTargetRegion ) );
+    Offset offset = MPIOffsetRegion( remoteSource ); 
     ti.srcTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );
 
-  //  printf( "source %d dest %d\n", ti.srcTaskId, ti.destTaskId ); 
+    printf( "source %d dest %d\n", ti.srcTaskId, ti.destTaskId ); 
   
     return ti;     
 }
  
 //------------------------------------------------------------------------------
-TransferInfo SendInfo( void* pdata, MPI_Comm cartcomm, int rank, 
-                       RegionID source, RegionID target, Array2D& g,
-                       int stencilWidth, int stencilHeight, int tag ) {
+// Create entry with information for data transfer from a local memory area
+// inside the core space(local grid minus ghost regions) to a remote MPI task
+// IN: local region, remote MPI task, data pointer, sub-array layout
+// OUT: transfer information including endpoints and MPI datatype matching the
+//      2d array layout passed as input 
+template< typename T > 
+TransferInfo CreateSendInfo( T* pdata, MPI_Comm cartcomm, int rank, 
+                             MPIGridCellID remoteTarget, RegionID localSourceRegion, Array2D& g,
+                             int stencilWidth, int stencilHeight, int tag ) {
     TransferInfo ti;
     ti.comm = cartcomm;
     ti.data = pdata;
     ti.srcTaskId = rank;
     ti.tag = tag;
     Array2D core = SubArrayRegion( g, stencilWidth, stencilHeight, CENTER );
-    ti.type = CreateMPISubArrayType( g, 
-                                     SubArrayRegion( core, stencilWidth, stencilHeight, source ) );
-    Offset offset = OffsetRegion( target ); 
+    ti.type = CreateMPISubArrayType< T >( g, 
+                                          SubArrayRegion( core, stencilWidth, stencilHeight, localSourceRegion ) );
+    Offset offset = MPIOffsetRegion( remoteTarget ); 
     ti.destTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );  
     return ti;     
 }
 
 //------------------------------------------------------------------------------
-void ExchangeData( std::vector< TransferInfo >& recvArray,
-                   std::vector< TransferInfo >& sendArray ) {
+// Iterate over arrays of data transfer info and perform actual MPI data transfers
+inline void ExchangeData( std::vector< TransferInfo >& recvArray,
+                          std::vector< TransferInfo >& sendArray ) {
 
     std::vector< int > requests( recvArray.size() + sendArray.size() );
     for( int i = 0; i != recvArray.size(); ++i ) {
@@ -355,130 +376,75 @@ void ExchangeData( std::vector< TransferInfo >& recvArray,
 }
 
 //------------------------------------------------------------------------------
+// Create pair of <recv, send> info array 
+template < typename T > 
 std::pair< std::vector< TransferInfo >,
            std::vector< TransferInfo > > 
-CreateSendRecvArrays( void* pdata, MPI_Comm cartcomm, int rank, Array2D& g,
+CreateSendRecvArrays( T* pdata, MPI_Comm cartcomm, int rank, Array2D& g,
                       int stencilWidth, int stencilHeight ) {
     std::vector< TransferInfo > ra;
     std::vector< TransferInfo > sa;
-    RegionID sendRegions[] = { TOP_LEFT,    TOP,    TOP_RIGHT,
-                               LEFT,                RIGHT,
-                               BOTTOM_LEFT, BOTTOM, BOTTOM_RIGHT };
-    RegionID recvRegions[] = { BOTTOM_RIGHT,  BOTTOM_CENTER,    BOTTOM_LEFT,
-                               CENTER_RIGHT,                CENTER_LEFT,
-                               TOP_RIGHT, TOP_CENTER, TOP_LEFT };
+    // send regions: data extracted from core(CENTER) region
+    RegionID localSendSource[] = { TOP_LEFT,    TOP,    TOP_RIGHT,
+                                    LEFT,                RIGHT,
+                                    BOTTOM_LEFT, BOTTOM, BOTTOM_RIGHT };
+    // recv regions: data inserted into local grid
+    RegionID localRecvTarget[]  = { BOTTOM_RIGHT,  BOTTOM_CENTER,    BOTTOM_LEFT,
+                                    CENTER_RIGHT,                CENTER_LEFT,
+                                    TOP_RIGHT, TOP_CENTER, TOP_LEFT };
 
-    // use send regions as tags
-    for( RegionID *s = sendRegions, *r = recvRegions; s !=  sendRegions + sizeof( sendRegions ) / sizeof( RegionID ); ++s, ++r ) {
-        ra.push_back( ReceiveInfo( pdata, cartcomm, rank, *s, *r, g, stencilWidth, stencilHeight, *s ) );   
-        sa.push_back( SendInfo( pdata, cartcomm, rank, *s, *r, g, stencilWidth, stencilHeight, *s ) );   
+    // remote send targets
+    MPIGridCellID remoteSendTarget[] = { MPI_TOP_LEFT,    MPI_TOP_CENTER,    MPI_TOP_RIGHT,
+                                         MPI_CENTER_LEFT,                    MPI_CENTER_RIGHT,
+                                         MPI_BOTTOM_LEFT, MPI_BOTTOM_CENTER, MPI_BOTTOM_RIGHT };
+
+
+    // remote recv sources
+    MPIGridCellID remoteRecvSource[] = { MPI_BOTTOM_RIGHT,  MPI_BOTTOM_CENTER, MPI_BOTTOM_LEFT,
+                                         MPI_CENTER_RIGHT,                     MPI_CENTER_LEFT,
+                                         MPI_TOP_RIGHT,     MPI_TOP_CENTER,    MPI_TOP_LEFT };
+
+    RegionID*      lss = &localSendSource [ 0 ];
+    MPIGridCellID* rst = &remoteSendTarget[ 0 ];
+    RegionID*      lrt = &localRecvTarget [ 0 ];
+    MPIGridCellID* rrs = &remoteRecvSource[ 0 ];
+    const size_t sz = sizeof( localSendSource ) / sizeof( RegionID );
+    const RegionID* end = lss + sz;
+    while( lss != end ) {
+        ra.push_back( CreateReceiveInfo( pdata,    // data 
+                                         cartcomm, // MPI cartesian communicator 
+                                         rank,     // rank of this process
+                                         *rrs,     // MPI cell id of process to read data from
+                                         *lrt,     // local receive target i.e. id of local area to fill
+                                            g,     // local 2D Array
+                                         stencilWidth, stencilHeight,
+                                         *lss ) );  // tag
+        sa.push_back( CreateSendInfo( pdata, cartcomm, rank,
+                                      *rst, // MPI cell id of process to send data to
+                                      *lss, // local send source i.e. id of local area to extract data from
+                                         g, // local 2D Array
+                                      stencilWidth, stencilHeight,
+                                      *lss ) ); // tag  
+
+        ++lss;
+        ++rst;
+        ++lrt;
+        ++rrs;                                           
     }
+
     return std::make_pair( ra, sa ); 
 }
 
 
 //------------------------------------------------------------------------------
-template < typename T >
-__global__ void InitData( T* pdata, Array2D layout, int value ) {
-    const int row = blockIdx.y * blockDim.y + threadIdx.y;
-    const int column =  blockIdx.x * blockDim.x + threadIdx.x;
-    Array2DAccessor< T > a( pdata, layout );
-    a( column, row ) = value;
-}
-
-
-//------------------------------------------------------------------------------
-template < typename T >
-void InitArray( T* pdata, const Array2D& g, const T& value ) {
-    InitData<<<dim3( g.width, g.height, 1 ), 1 >>>( pdata, g, value );
-}
-
-
-//------------------------------------------------------------------------------
-template < typename T >
-void Compute( T* pdata, const Array2D& g ) {}
-
-//------------------------------------------------------------------------------
-template < typename T >
-bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
-
-
-//------------------------------------------------------------------------------
-int main( int argc, char** argv ) {
-#if 0 
-    void TestSubRegionExtraction();
-    TestSubRegionExtraction();
-#else
-    int numtasks = 0; 
-    // Init, world size     
-    MPI_Init( &argc, &argv );
-    MPI_Errhandler_set( MPI_COMM_WORLD, MPI_ERRORS_RETURN );
-    MPI_Comm_size( MPI_COMM_WORLD, &numtasks );
-    // 2D square MPI cartesian grid 
-    const int DIM = int( std::sqrt( double( numtasks ) ) );
-    std::vector< int > dims( 2, DIM );
-    std::vector< int > periods( 2, 1 ); //periodic in both dimensions
-    const int reorder = 0; //false - no reorder, is it actually used ?
-    MPI_Comm cartcomm; // communicator for cartesian grid
-    MPI_Cart_create( MPI_COMM_WORLD, 2, &dims[ 0 ], &periods[ 0 ], reorder, &cartcomm ); 
-    // current mpi task id of this process
-    int task = -1;
-    MPI_Comm_rank( cartcomm, &task );
-    
-    std::vector< int > coords( 2, -1 );
-    MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
-      
-    std::ostringstream ss;
-    ss << coords[ 0 ] << '_' << coords[ 1 ];
-    std::ofstream os( ss.str().c_str() );
-    os << "Rank:  " << task << std::endl
-       << "Coord: " << coords[ 0 ] << ", " << coords[ 1 ] << std::endl;
-    // Init data
-    int localWidth = 16;
-    int localHeight = 16;
-    int stencilWidth = 5;
-    int stencilHeight = 5;
-    int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
-    int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
-    
-    REAL* deviceBuffer = 0;
-    cudaMalloc( &deviceBuffer, localTotalWidth * localTotalHeight * sizeof( REAL ) );
-    cudaMemset( deviceBuffer, 0, localTotalWidth * localTotalHeight * sizeof( REAL ) );   
-    Array2D localArray( localTotalWidth, localTotalHeight, localTotalWidth );
-    // Create transfer info arrays
-    typedef std::vector< TransferInfo > VTI;
-    std::pair< VTI, VTI > transferInfoArrays =
-        CreateSendRecvArrays( deviceBuffer, cartcomm, task, localArray, stencilWidth, stencilHeight );     
-    Array2D core = SubArrayRegion( localArray, stencilWidth, stencilHeight, CENTER );
-    InitArray( deviceBuffer, core, REAL( task + 1 ) ); //init with this MPI task id
-    os << "Array" << std::endl;
-    std::vector< REAL > hostBuffer( localArray.width * localArray.height );
-    cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
-                cudaMemcpyDeviceToHost );
-    Print( &hostBuffer[ 0 ], localArray, os );
-    os << std::endl;
-    // Exchange data and compute until condition met
-    do {
-        ExchangeData( transferInfoArrays.first, transferInfoArrays.second );
-        Compute( deviceBuffer, core );
-    } while( !TerminateCondition( deviceBuffer, core ) );
-    os << "Array after exchange" << std::endl;    
-    MPI_Finalize();
-    cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localArray.width * localArray.height * sizeof( REAL ),
-                cudaMemcpyDeviceToHost );
-    Print( &hostBuffer[ 0 ], localArray, os );   
- #endif
-    return 0;
-}
- 
-//------------------------------------------------------------------------------
-void TestSubRegionExtraction() {
+inline void TestSubRegionExtraction() {
     const int w = 32;
     const int h = 32;
     const int stencilWidth = 5;
     const int stencilHeight = 5;
     const int totalWidth = w + stencilWidth / 2;
     const int totalHeight = h + stencilHeight / 2;
+    // Grid(core + halo)
     std::vector< int > data( totalWidth * totalHeight, 0 );
     Array2D grid( totalWidth, totalHeight, totalWidth );
     Array2D topleft = SubArrayRegion( grid, stencilWidth, stencilHeight, TOP_LEFT );
@@ -508,6 +474,7 @@ void TestSubRegionExtraction() {
 
     std::cout << "\nSUBGRID TEST\n";
 
+    // Core space(area of stencil application)
     Array2D core = center;
     topleft = SubArrayRegion( core, stencilWidth, stencilHeight, TOP_LEFT );
     topcenter = SubArrayRegion( core, stencilWidth, stencilHeight, TOP_CENTER );
@@ -539,6 +506,24 @@ void TestSubRegionExtraction() {
     std::cout << "right:         " << right        << std::endl;
     std::cout << "bottom:        " << bottom       << std::endl;
     std::cout << "left:          " << left         << std::endl;
-
 }
 
+//------------------------------------------------------------------------------
+inline void PrintCartesianGrid( std::ostream& os, MPI_Comm comm, int rows, int columns ) {
+
+    std::vector< std::vector< int > > grid( rows, std::vector< int >( columns, -1 ) );
+
+    for( int r = 0; r != rows; ++r ) {
+        for( int c = 0; c != columns; ++c ) {
+            int coords[] = { -1, -1 };
+            MPI_Cart_coords( comm, r * columns + c, 2, coords );
+            grid[ coords[ 0 ] ][ coords[ 1 ] ] = r * columns + c;   
+        }        
+    }
+    for( int r = 0; r != rows; ++r ) {
+        for( int c = 0; c != columns; ++c ) {
+            os << grid[ r ][ c ] << ' '; 
+        }
+        os << std::endl;
+    }   
+}
