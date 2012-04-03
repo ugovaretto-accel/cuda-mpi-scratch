@@ -9,5 +9,5 @@ INCLUDE(CMakeForceCompiler)
 include_directories( ${MPI_INCLUDE_PATH} )
 find_package( CUDA )
 
-cuda_add_executable( cudasubarray mpi12-subarray-cuda.cu)
+cuda_add_executable( cuda-2d-stencil-subarray mpi12-2d-stencil-subarray-cuda.cu )
 
