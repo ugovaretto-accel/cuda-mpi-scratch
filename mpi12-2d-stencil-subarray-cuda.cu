@@ -10,6 +10,10 @@
 typedef double REAL;
 
 //------------------------------------------------------------------------------
+// specialization for array element type
+template <> MPI_Datatype CreateArrayElementType< double >() { return MPI_DOUBLE_PRECISION; }
+
+//------------------------------------------------------------------------------
 template < typename T >
 __global__ void InitKernel( T* pdata, Array2D layout, T value ) {
     const int row = blockIdx.y * blockDim.y + threadIdx.y;

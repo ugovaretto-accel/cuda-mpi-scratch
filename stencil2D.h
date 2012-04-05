@@ -201,9 +201,10 @@ inline Array2D SubArrayRegion( const Array2D& g,
 }
 
 //------------------------------------------------------------------------------
+// Point of customization for client code: specialize this function for the
+// array element data type of choice
 template < typename T > MPI_Datatype CreateArrayElementType();
 
-template <> MPI_Datatype CreateArrayElementType< double >() { return MPI_DOUBLE_PRECISION; }
 
 //------------------------------------------------------------------------------
 template < typename T >

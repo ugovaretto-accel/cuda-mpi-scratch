@@ -4,6 +4,11 @@
 
 typedef double REAL;
 
+
+//------------------------------------------------------------------------------
+// Specialization for array elment type
+template <> MPI_Datatype CreateArrayElementType< double >() { return MPI_DOUBLE_PRECISION; }
+
 //------------------------------------------------------------------------------
 template < typename T >
 void InitArray( T* pdata, const Array2D& g, const T& value ) {
