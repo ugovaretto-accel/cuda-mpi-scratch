@@ -38,10 +38,7 @@ bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 //------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
-#if 0 
-    void TestSubRegionExtraction();
-    TestSubRegionExtraction();
-#else
+    //TestSubRegionExtraction();
     int numtasks = 0; 
     // Init, world size     
     MPI_Init( &argc, &argv );
@@ -123,6 +120,5 @@ int main( int argc, char** argv ) {
     cudaMemcpy( &hostBuffer[ 0 ], deviceBuffer, localTotalByteSize, cudaMemcpyDeviceToHost );
     Print( &hostBuffer[ 0 ], localArray, os );   
     cudaFree( deviceBuffer );     
-#endif
     return 0;
 }

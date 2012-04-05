@@ -33,9 +33,7 @@ bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 //------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
-#if 0 
-    TestSubRegionExtraction();
-#else
+    //TestSubRegionExtraction();
     int numtasks = 0; 
     // Init, world size     
     MPI_Init( &argc, &argv );
@@ -98,6 +96,5 @@ int main( int argc, char** argv ) {
     os << "Array after exchange" << std::endl;    
     MPI_Finalize();
     Print( &dataBuffer[ 0 ], localArray, os );   
- #endif
     return 0;
 }
