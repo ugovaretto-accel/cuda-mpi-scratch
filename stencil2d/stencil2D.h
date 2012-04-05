@@ -330,7 +330,7 @@ TransferInfo CreateReceiveInfo( T* pdata, MPI_Comm cartcomm, int rank,
     Offset offset = MPIOffsetRegion( remoteSource ); 
     ti.srcTaskId = OffsetTaskId( cartcomm, offset.x, offset.y );
 
-    printf( "source %d dest %d\n", ti.srcTaskId, ti.destTaskId ); 
+// printf( "source %d dest %d\n", ti.srcTaskId, ti.destTaskId ); 
   
     return ti;     
 }

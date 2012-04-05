@@ -1,0 +1,26 @@
+Sample code performing data exchange between tiles of a 2D grid(array) mapped to a 2D MPI cartesian grid.
+
+Works on both CPU and GPU(with mvapich2 >= 1.8) using MPI subarray type. 
+
+sample2D.h implements a minimal stencil library to generate MPI subarray data types associated
+with the regions of the local grids and to exchange data over MPI.
+
+Data and layout are kept separate:
+* the data region is referenced by a plain pointer
+* layout information is stored in a struct
+
+Data exhange works by first creating an array of data transfer configurations and issuing
+Isend/Irecev calls all at once at each exhange requests.
+
+Everything is templated on the 2d array data type, the point of customization for client code
+is the function
+
+template < typename T > MPI_Datatype CreateArrayElementType();
+
+which must be implemented for the data type used as the array element. 
+
+The CMakeLists.txt file is useful for compiling the cuda version only, for the CPU
+version just invoke mpic++ directly.
+
+
+ 

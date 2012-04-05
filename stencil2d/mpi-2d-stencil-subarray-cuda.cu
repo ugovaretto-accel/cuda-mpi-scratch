@@ -36,7 +36,6 @@ void Compute( T* pdata, const Array2D& g ) {}
 template < typename T >
 bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
-
 //------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
 #if 0 
@@ -69,8 +68,9 @@ int main( int argc, char** argv ) {
         std::cerr << "No CUDA devices found" << std::endl;
         return 1;
     }
-    cudaSetDevice( task % numDevices );
-
+    const int cudaDeviceId = task % numDevices;
+    cudaSetDevice( cudaDeviceId );
+    
     std::vector< int > coords( 2, -1 );
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
       
@@ -79,6 +79,7 @@ int main( int argc, char** argv ) {
     std::ofstream os( ss.str().c_str() );
     os << "Rank:  " << task << std::endl
        << "Coord: " << coords[ 0 ] << ", " << coords[ 1 ] << std::endl;
+    os << "\nCUDA device id: " << cudaDeviceId << std::endl;
     
     os << std::endl << "Compute grid" << std::endl;
     PrintCartesianGrid( os, cartcomm, DIM, DIM );
