@@ -1,6 +1,8 @@
 Rank:  2
 Coord: 0, 2
 
+CUDA device id: 0
+
 Compute grid
 0 1 2 
 3 4 5 
