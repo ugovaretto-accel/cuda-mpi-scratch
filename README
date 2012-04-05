@@ -1,7 +1,7 @@
 CUDA-MPI scratchpad.
 
 Environment:
-* mvapich >= 1.7 & CRAY MPI
+* mvapich2 >= 1.7 & CRAY MPI
 * CUDA >= 3.2
 * PBS and SLURM
 * Linux clusters and Cray XK6
