@@ -37,8 +37,47 @@ template < typename T >
 bool TerminateCondition( T* pdata, const Array2D& g ) { return true; }
 
 //------------------------------------------------------------------------------
+void BindDevice() {
+  int local_rank, num_local_procs;
+  int dev_count, use_dev_count, my_dev_id;
+  char *str;
+
+  if( ( str = getenv ( "MV2_COMM_WORLD_LOCAL_RANK") ) != NULL ) {
+      local_rank = atoi ( str );
+      printf( "MV2_COMM_WORLD_LOCAL_RANK %s\n", str );
+  }
+  if( ( str = getenv ("MPISPAWN_LOCAL_NPROCS") ) != NULL ) {
+      num_local_procs = atoi( str );
+      printf( "MPISPAWN_LOCAL_NPROCS %s\n", str );
+  }
+  cudaGetDeviceCount( &dev_count );
+  // NUM_GPU_DEVICES allows to explicitly select the maximum
+  // number of devices to use
+  if( ( str = getenv ("NUM_GPU_DEVICES") ) != NULL ) {
+      use_dev_count = atoi( str );
+      printf( "NUM_GPU_DEVICES %s\n", str );
+  } else {
+      use_dev_count = dev_count;
+  }
+  my_dev_id = local_rank % use_dev_count;
+  printf( "local rank = %d dev id = %d\n", local_rank, my_dev_id );
+  cudaSetDevice( my_dev_id );
+}
+
+
+//------------------------------------------------------------------------------
 int main( int argc, char** argv ) {
     //TestSubRegionExtraction();
+    int numDevices = 0;
+    cudaGetDeviceCount( &numDevices );
+    if( numDevices < 1 ) {
+        std::cerr << "No CUDA devices found" << std::endl;
+        return 1;
+    }
+    // MPI process to GPU binding must be performed before calling
+    // MPI_Init to allow the MVAPICH2 run-time to operate within
+    // the proper context
+    BindDevice();
     int numtasks = 0; 
     // Init, world size     
     MPI_Init( &argc, &argv );
@@ -59,12 +98,6 @@ int main( int argc, char** argv ) {
     int task = -1;
     MPI_Comm_rank( cartcomm, &task );
    
-    int numDevices = 0;
-    cudaGetDeviceCount( &numDevices );
-    if( numDevices < 1 ) {
-        std::cerr << "No CUDA devices found" << std::endl;
-        return 1;
-    }
     const int cudaDeviceId = task % numDevices;
     cudaSetDevice( cudaDeviceId );
     
