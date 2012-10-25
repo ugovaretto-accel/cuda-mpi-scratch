@@ -1,6 +1,6 @@
 *~
 a.out
-tmp
+*tmp*
 job_*
 slurm_*
 0_*
