@@ -75,4 +75,20 @@ The data written to each is:
 
 checkout the files in the _sample-output_ folder for examples of generated output data.
 
+##Implementation
 
+The sample code implements a standard exchange-compute-check loop where the exchange part iterates over an array of data transfer configurations and performs the required exchange through calls to MPI_ISend/Receive passing the pointer to gpu memory directly to the MPI functions.
+
+Each MPI process pre-computes a list of source-destination pairs through a call to the function CreateSendRecvArrays.
+
+MPI _subarray_ type is used for data exhange of halo regions.
+
+The ExchangeData function sends and receives data by passing the pointer to device memory directly to MPI_Isend/recv.
+
+The client code is required to supply an implementation of the function:
+
+```
+MPI_Datatype CreateMPISubArrayType< T >()
+```
+
+To map from any data type to a proper MPI_Datatype.
