@@ -32,11 +32,12 @@ module load cmake
 module load cuda (>= 4.1 required)
 module load mvapich2 ( >= 1.8.1 required)
 module load gcc/4.6.3 (works with anything < 4.7 due to CUDA not supporting gcc 4.7)
-
-cmake
-
+cmake -DCUDA_NVCC_FLAGS="-arch=sm_20"
 make
 ```
+
+The *sm_20* flag is required for double precison support. 
+
 
 To build the non-cuda version invoke mpic++ directly on the .cpp file.
 
@@ -92,3 +93,8 @@ MPI_Datatype CreateArrayElementType< T >()
 ```
 
 To map from any data type to a proper MPI_Datatype.
+
+The current sample code has an empty 'Compute()' function and a 'TeminateCondition()' function which always returns _true_ so the data exchange is executed only once.
+
+
+
