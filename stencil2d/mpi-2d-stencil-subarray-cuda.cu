@@ -98,12 +98,11 @@ int main( int argc, char** argv ) {
     int task = -1;
     MPI_Comm_rank( cartcomm, &task );
    
-    const int cudaDeviceId = task % numDevices;
-    cudaSetDevice( cudaDeviceId );
     
     std::vector< int > coords( 2, -1 );
     MPI_Cart_coords( cartcomm, task, 2, &coords[ 0 ] );
-      
+    int cudaDeviceId = -1;
+    cudaGetDevice( &cudaDeviceId );  
     std::ostringstream ss;
     ss << coords[ 0 ] << '_' << coords[ 1 ];
     std::ofstream os( ss.str().c_str() );
