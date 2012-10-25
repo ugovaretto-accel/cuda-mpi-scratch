@@ -76,6 +76,9 @@ The data written to each is:
 
 checkout the files in the _sample-output_ folder for examples of generated output data.
 
+The current tile size is 16x16 and halo size is 5x5, hardcoded in the sample code.
+
+
 ##Implementation
 
 The sample code implements a standard exchange-compute-check loop where the exchange part iterates over an array of data transfer configurations and performs the required exchange through calls to MPI_ISend/Receive passing the pointer to gpu memory directly to the MPI functions.
