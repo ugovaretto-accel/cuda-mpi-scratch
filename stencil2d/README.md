@@ -88,7 +88,7 @@ The ExchangeData function sends and receives data by passing the pointer to devi
 The client code is required to supply an implementation of the function:
 
 ```
-MPI_Datatype CreateMPISubArrayType< T >()
+MPI_Datatype CreateArrayElementType< T >()
 ```
 
 To map from any data type to a proper MPI_Datatype.
