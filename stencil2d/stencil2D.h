@@ -363,7 +363,7 @@ TransferInfo CreateSendInfo( T* pdata, MPI_Comm cartcomm, int rank,
 inline void ExchangeData( std::vector< TransferInfo >& recvArray,
                           std::vector< TransferInfo >& sendArray ) {
 
-    std::vector< int > requests( recvArray.size() + sendArray.size() );
+    std::vector< MPI_Request  > requests( recvArray.size() + sendArray.size() );
     for( int i = 0; i != recvArray.size(); ++i ) {
         TransferInfo& t = recvArray[ i ];
         MPI_Irecv( t.data, 1, t.type, t.srcTaskId, t.tag, t.comm, &( requests[ i ] ) );  

@@ -42,10 +42,18 @@ void BindDevice() {
   int dev_count, use_dev_count, my_dev_id;
   char *str;
 
+#ifdef OPEN_MPI
+  if( ( str = getenv ( "OMPI_COMM_WORLD_LOCAL_RANK") ) != NULL ) {
+      local_rank = atoi ( str );
+      printf( "OMPI_COMM_WORLD_LOCAL_RANK %s\n", str );
+  }
+#else // assuming MVAPICH2
   if( ( str = getenv ( "MV2_COMM_WORLD_LOCAL_RANK") ) != NULL ) {
       local_rank = atoi ( str );
       printf( "MV2_COMM_WORLD_LOCAL_RANK %s\n", str );
   }
+#endif
+
   if( ( str = getenv ("MPISPAWN_LOCAL_NPROCS") ) != NULL ) {
       num_local_procs = atoi( str );
       printf( "MPISPAWN_LOCAL_NPROCS %s\n", str );
@@ -119,6 +127,21 @@ int main( int argc, char** argv ) {
     int localHeight = 16;
     int stencilWidth = 5;
     int stencilHeight = 5;
+
+    if( argc >= 2 ) {
+        localWidth = atoi( argv[ 1 ] );
+        localHeight = localWidth;
+    }
+    if( argc >= 3 ) {
+        stencilWidth = atoi( argv[ 2 ] );
+        stencilHeight = stencilHeight;
+    }
+    if( localWidth < stencilWidth ) {
+        std::cerr << "Error: grid size < stencil size" << std::endl;
+        return 1;
+    }
+
+
     int localTotalWidth = localWidth + 2 * ( stencilWidth / 2 );
     int localTotalHeight = localHeight + 2 * ( stencilHeight / 2 );
     const size_t localTotalSize = localTotalWidth * localTotalHeight;
