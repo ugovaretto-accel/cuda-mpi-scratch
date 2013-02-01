@@ -1,4 +1,4 @@
-##Stencil computation with GPU-aware MPI implementations
+##Stencil computations with GPU-aware MPI implementations
 
 Sample code performing data exchange between tiles of a 2D grid(array) mapped to a 2D MPI cartesian grid.
 
