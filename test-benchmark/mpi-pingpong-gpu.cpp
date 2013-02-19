@@ -58,11 +58,14 @@ int main(int argc, char** argv) {
         const bool passed = std::equal(host_data.begin(), host_data.end(),
                                 device_host_data.begin());
         if(passed) {
-          std::cout << "PASSED\n"
-                    << "Message size(MB): " << (byte_size/(1024*1024.0)) << std::endl  
-                    << "Time(s): " << (exchange_time - start_time) << std::endl
-                    << "Device to host transfer time(s): "
-                    << (device_host_time - exchange_time) << std::endl;
+          std::cout << "PASSED\n";
+          if( byte_size < 1024 * 1024 ) 
+            std::cout << "Message size(bytes): " << byte_size << std::endl;
+          else    
+            std::cout << "Message size(MB): " << (byte_size/(1024*1024.0)) << std::endl;  
+          std::cout << "Round-trip time(ms): " << 1000 * (exchange_time - start_time) << std::endl
+                    << "Device to host transfer time(ms): "
+                    << 1000 * (device_host_time - exchange_time) << std::endl;
         } else {
           std::cout << "FAILED" << std::endl;
         }     
@@ -70,9 +73,7 @@ int main(int argc, char** argv) {
       dest = 0;
       source = 0;
       MPI_Recv(device_data_recv, size, MPI_DOUBLE, source, tag0to1, MPI_COMM_WORLD, &status);
-      CHECK_CUDA_ERROR(cudaMemcpy(device_data_send, 
-                                  device_data_recv, byte_size, cudaMemcpyDeviceToDevice));
-      MPI_Send(device_data_send, size, MPI_DOUBLE, dest, tag1to0, MPI_COMM_WORLD);
+      MPI_Send(device_data_recv, size, MPI_DOUBLE, dest, tag1to0, MPI_COMM_WORLD);
     }
     CHECK_CUDA_ERROR(cudaFree(device_data_send));
     CHECK_CUDA_ERROR(cudaFree(device_data_recv));
