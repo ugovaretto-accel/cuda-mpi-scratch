@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
     CHECK_CUDA_ERROR(cudaFree(device_data_send));
     CHECK_CUDA_ERROR(cudaFree(device_data_recv));
     MPI_Finalize();
+    CHECK_CUDA_ERROR(cudaDeviceReset());
     return 0;
 }
 
