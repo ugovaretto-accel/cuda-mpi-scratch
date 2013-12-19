@@ -31,7 +31,7 @@ To build the cuda-enabled version:
 module load cmake
 module load cuda (>= 4.1 required)
 module load mvapich2 ( >= 1.8.1 required)
-module load gcc/4.6.3 (works with anything < 4.7 due to CUDA not supporting gcc 4.7)
+module load gcc
 cmake -DCUDA_NVCC_FLAGS="-arch=sm_20"
 make
 ```
@@ -59,7 +59,7 @@ Sample _slurm_ sbatch script:
 . /etc/profile.d/modules.bash
 module load mvapich2
 module load cuda
-module load gcc/4.6.3
+module load gcc
 
 mpiexec.hydra -rmk slurm ./cuda-2d-stencil-subarray
 ```
