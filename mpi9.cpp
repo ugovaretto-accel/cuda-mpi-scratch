@@ -6,17 +6,9 @@
 #include <vector>
 #include <algorithm>
 #include <iterator>
+#include <numeric>
 #include "mpierr.h"
 #include <unistd.h> 
-
-
-// only available in origianl SGI STL implementation
-template < typename ForwardIterator, typename T >
-void Iota( ForwardIterator begin, ForwardIterator end, T value ) {
-    for( ; begin != end; ++begin, ++value ) *begin = value;    
-
-}  
-
 
 int main( int argc, char** argv ) {
 
@@ -35,8 +27,8 @@ int main( int argc, char** argv ) {
     MPI_( MPI_Comm_group( MPI_COMM_WORLD, &orig_group ) );
     std::vector< int > first_group_ranks( numtasks / 2, -1 );
     std::vector< int > second_group_ranks( numtasks / 2, -1 );
-    Iota( first_group_ranks.begin(),  first_group_ranks.end(),  0 );
-    Iota( second_group_ranks.begin(), second_group_ranks.end(), numtasks / 2 );
+    std::iota( first_group_ranks.begin(),  first_group_ranks.end(),  0 );
+    std::iota( second_group_ranks.begin(), second_group_ranks.end(), numtasks / 2 );
     // divide tasks into two groups: each call to MPI_Group_incl
     // generates a new group with a new set of rank ids
     if( task < numtasks / 2 ) {
